@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-"""Resumen de recursos del equipo local."""
-
 import argparse
 import json
 import platform
@@ -18,13 +16,18 @@ def collect_report(path):
     disk = psutil.disk_usage(path)
     interfaces = {}
     for name, addresses in psutil.net_if_addrs().items():
-        interfaces[name] = [address.address for address in addresses
-                            if address.family in (socket.AF_INET, socket.AF_INET6)]
+        interfaces[name] = []
+        for address in addresses:
+            if address.family in (socket.AF_INET, socket.AF_INET6):
+                interfaces[name].append(address.address)
     alerts = []
-    for label, value in (("CPU", cpu), ("RAM", memory.percent), ("Disco", disk.percent)):
-        if value >= 90:
-            alerts.append(f"{label}: uso alto ({value}%)")
-    return {
+    if cpu >= 90:
+        alerts.append("CPU: uso alto ({}%)".format(cpu))
+    if memory.percent >= 90:
+        alerts.append("RAM: uso alto ({}%)".format(memory.percent))
+    if disk.percent >= 90:
+        alerts.append("Disco: uso alto ({}%)".format(disk.percent))
+    report = {
         "hostname": socket.gethostname(),
         "os": platform.platform(),
         "cpu_model": platform.processor() or "No informado por el sistema",
@@ -37,32 +40,39 @@ def collect_report(path):
         "disk_percent": disk.percent,
         "uptime": str(timedelta(seconds=int(time.time() - psutil.boot_time()))),
         "interfaces": interfaces,
-        "status": "Atención" if alerts else "Sin umbrales superados",
+        "status": "Sin umbrales superados",
         "alerts": alerts,
     }
+    if alerts:
+        report["status"] = "Atención"
+    return report
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Muestra información del equipo")
     parser.add_argument("--path", default=str(Path.home().anchor), help="Ruta del volumen a consultar")
-    parser.add_argument("--json", action="store_true", help="Salida JSON")
+    parser.add_argument("--json", action="store_true", help="Muestra JSON")
     args = parser.parse_args()
     try:
         report = collect_report(args.path)
     except (OSError, psutil.Error) as error:
-        parser.exit(1, f"No se pudo consultar el sistema: {error}\n")
+        parser.exit(1, "Error: {}\n".format(error))
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return
-    print(f"Equipo: {report['hostname']}\nSistema: {report['os']}")
-    print(f"CPU: {report['cpu_model']} | {report['cpu_logical_count']} lógicos | {report['cpu_percent']}%")
-    print(f"RAM: {report['ram_percent']}% de {report['ram_total_gib']} GiB")
-    print(f"Disco ({report['disk_path']}): {report['disk_percent']}% de {report['disk_total_gib']} GiB")
-    print(f"Encendido: {report['uptime']}\nEstado: {report['status']}")
+    print("Equipo: {}\nSistema: {}".format(report["hostname"], report["os"]))
+    print("CPU: {} | {} lógicos | {}%".format(report["cpu_model"], report["cpu_logical_count"], report["cpu_percent"]))
+    print("RAM: {}% de {} GiB".format(report["ram_percent"], report["ram_total_gib"]))
+    print("Disco ({}): {}% de {} GiB".format(report["disk_path"], report["disk_percent"], report["disk_total_gib"]))
+    print("Encendido: {}\nEstado: {}".format(report["uptime"], report["status"]))
     for name, addresses in report['interfaces'].items():
-        print(f"Red {name}: {', '.join(addresses) or 'Sin IP'}")
+        if addresses:
+            value = ", ".join(addresses)
+        else:
+            value = "Sin IP"
+        print("Red {}: {}".format(name, value))
     for alert in report['alerts']:
-        print(f"Aviso: {alert}")
+        print("Aviso: {}".format(alert))
 
 
 if __name__ == "__main__":
